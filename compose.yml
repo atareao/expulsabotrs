@@ -1,6 +1,6 @@
 services:
   expulsabot:
-    image: atareao/expulsabot:latest
+    image: atareao/expulsabotrs:latest
     container_name: expulsabot
     init: true
     restart: unless-stopped

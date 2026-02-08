@@ -1,6 +1,6 @@
 user    := "atareao"
-name    := `basename ${PWD}`
-version := `git tag -l  | tail -n1`
+name    := "expulsabotrs"
+version := `vampus show`
 
 build:
     echo {{version}}

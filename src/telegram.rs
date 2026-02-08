@@ -139,194 +139,202 @@ pub struct TelegramResponse<T> {
 
 // --- Helper functions for Telegram API interactions ---
 
-pub async fn send_request<T: for<'de> Deserialize<'de> + 'static>(
-    client: &Client,
-    bot_token: &str,
-    method: &str,
-    json_payload: serde_json::Value,
-) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("{}{}/{}", TELEGRAM_API_URL, bot_token, method);
-    debug!(
-        "Sending request to Telegram API: {} with payload: {}",
-        url, json_payload
-    );
-    let response = client.post(&url).json(&json_payload).send().await?;
-
-    let response_json = response.json::<TelegramResponse<T>>().await?;
-
-    if response_json.ok {
-        Ok(response_json.result)
-    } else {
-        let error_message = response_json
-            .description
-            .unwrap_or_else(|| "Unknown error".to_string());
-        Err(format!(
-            "Telegram API Error ({}/{}): {}",
-            method, response_json.ok, error_message
-        )
-        .into())
-    }
+#[derive(Debug, Clone)]
+pub struct Telegram {
+    client: Client,
+    token: String,
 }
 
-pub async fn send_message(
-    client: &Client,
-    bot_token: &str,
-    chat_id: i64,
-    text: &str,
-) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-    let payload = serde_json::json!({
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-    });
-    send_request(client, bot_token, "sendMessage", payload)
-        .await
-        .map(|result: SentMessageResult| result.message_id)
-}
+impl Telegram {
 
-pub async fn send_message_with_keyboard(
-    client: &Client,
-    bot_token: &str,
-    chat_id: i64,
-    text: &str,
-    keyboard: InlineKeyboardMarkup,
-) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-    let payload = serde_json::json!({
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "reply_markup": serde_json::to_value(keyboard)?,
-    });
-    send_request(client, bot_token, "sendMessage", payload)
-        .await
-        .map(|result: SentMessageResult| result.message_id)
-}
-
-pub async fn restrict_chat_member(
-    client: &Client,
-    bot_token: &str,
-    chat_id: i64,
-    user_id: i64,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let payload = serde_json::json!({
-        "chat_id": chat_id,
-        "user_id": user_id,
-        "permissions": {
-            "can_send_messages": false,
-            "can_send_media_messages": false,
-            "can_send_other_messages": false,
-            "can_add_web_page_previews": false,
-            "can_change_info": false,
-            "can_invite_users": false,
-            "can_pin_messages": false,
-        },
-        "use_independent_chat_permissions": false,
-        "until_date": 0
-    });
-    let _: bool = send_request(client, bot_token, "restrictChatMember", payload).await?;
-    Ok(())
-}
-
-pub async fn unrestrict_chat_member(
-    client: &Client,
-    bot_token: &str,
-    chat_id: i64,
-    user_id: i64,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let payload = serde_json::json!({
-        "chat_id": chat_id,
-        "user_id": user_id,
-        "permissions": {
-            "can_send_messages": true,
-            "can_send_media_messages": true,
-            "can_send_other_messages": true,
-            "can_add_web_page_previews": true,
-            "can_change_info": true,
-            "can_invite_users": true,
-            "can_pin_messages": true,
-        },
-        "use_independent_chat_permissions": false,
-        "until_date": 0
-    });
-    let _: bool = send_request(client, bot_token, "restrictChatMember", payload).await?;
-    Ok(())
-}
-
-pub async fn ban_chat_member(
-    client: &Client,
-    bot_token: &str,
-    chat_id: i64,
-    user_id: i64,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let payload = serde_json::json!({
-        "chat_id": chat_id,
-        "user_id": user_id,
-        "revoke_messages": true
-    });
-    let _: bool = send_request(client, bot_token, "banChatMember", payload).await?;
-    Ok(())
-}
-
-pub async fn delete_message(
-    client: &Client,
-    bot_token: &str,
-    chat_id: i64,
-    message_id: u64,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let payload = serde_json::json!({
-        "chat_id": chat_id,
-        "message_id": message_id,
-    });
-    let _: bool = send_request(client, bot_token, "deleteMessage", payload).await?;
-    Ok(())
-}
-
-pub async fn get_updates(
-    client: &Client,
-    bot_token: &str,
-    offset: u64,
-) -> Result<Vec<Update>, Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!(
-        "{}{}/getUpdates?offset={}&timeout=60",
-        TELEGRAM_API_URL, bot_token, offset
-    );
-
-    // Debug: log the URL being called
-    debug!("Calling Telegram API: {}", url);
-
-    let response = client.get(&url).send().await?;
-    debug!("Received response from Telegram API: {:?}", response);
-    let status = response.status();
-    // Check if response status is OK
-    if !status.is_success() {
-        let content = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "No content".to_string());
-        return Err(format!("HTTP Error: {}. {}", status, content).into());
-    }
-
-    // Get response text for debugging
-    let response_text = response.text().await?;
-    debug!("Response text: {}", response_text);
-
-    // Try to parse the response
-    match serde_json::from_str::<TelegramResponse<Vec<Update>>>(&response_text) {
-        Ok(updates_response) => {
-            if updates_response.ok {
-                Ok(updates_response.result)
-            } else {
-                Err(updates_response
-                    .description
-                    .unwrap_or_else(|| "Unknown error".to_string())
-                    .into())
-            }
+    pub fn new(token: &str) -> Self {
+        Telegram {
+            client: Client::new(),
+            token: token.to_string(),
         }
-        Err(parse_error) => {
-            // Log the response text that failed to parse
-            error!("Failed to parse response: {}", parse_error);
-            error!("Response text: {}", response_text);
-            Err(format!("Failed to parse Telegram API response: {}", parse_error).into())
+    }
+
+    pub async fn send_request<T: for<'de> Deserialize<'de> + 'static>(
+        &self,
+        method: &str,
+        json_payload: serde_json::Value,
+    ) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("{}{}/{}", TELEGRAM_API_URL, &self.token, method);
+        debug!(
+            "Sending request to Telegram API: {} with payload: {}",
+            url, json_payload
+        );
+        let response = self.client.post(&url).json(&json_payload).send().await?;
+
+        let response_json = response.json::<TelegramResponse<T>>().await?;
+
+        if response_json.ok {
+            Ok(response_json.result)
+        } else {
+            let error_message = response_json
+                .description
+                .unwrap_or_else(|| "Unknown error".to_string());
+            Err(format!(
+                "Telegram API Error ({}/{}): {}",
+                method, response_json.ok, error_message
+            )
+            .into())
+        }
+    }
+
+    pub async fn send_message(
+        &self,
+        chat_id: i64,
+        text: &str,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        let payload = serde_json::json!({
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+        });
+        self.send_request("sendMessage", payload)
+            .await
+            .map(|result: SentMessageResult| result.message_id)
+    }
+
+    pub async fn send_message_with_keyboard(
+        &self,
+        chat_id: i64,
+        text: &str,
+        keyboard: InlineKeyboardMarkup,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        let payload = serde_json::json!({
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "reply_markup": serde_json::to_value(keyboard)?,
+        });
+        self.send_request( "sendMessage", payload)
+            .await
+            .map(|result: SentMessageResult| result.message_id)
+    }
+
+    pub async fn restrict_chat_member(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let payload = serde_json::json!({
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "permissions": {
+                "can_send_messages": false,
+                "can_send_media_messages": false,
+                "can_send_other_messages": false,
+                "can_add_web_page_previews": false,
+                "can_change_info": false,
+                "can_invite_users": false,
+                "can_pin_messages": false,
+            },
+            "use_independent_chat_permissions": false,
+            "until_date": 0
+        });
+        let _: bool = self.send_request( "restrictChatMember", payload).await?;
+        Ok(())
+    }
+
+    pub async fn unrestrict_chat_member(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let payload = serde_json::json!({
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "permissions": {
+                "can_send_messages": true,
+                "can_send_media_messages": true,
+                "can_send_other_messages": true,
+                "can_add_web_page_previews": true,
+                "can_change_info": true,
+                "can_invite_users": true,
+                "can_pin_messages": true,
+            },
+            "use_independent_chat_permissions": false,
+            "until_date": 0
+        });
+        let _: bool = self.send_request( "restrictChatMember", payload).await?;
+        Ok(())
+    }
+
+    pub async fn ban_chat_member(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let payload = serde_json::json!({
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "revoke_messages": true
+        });
+        let _: bool = self.send_request("banChatMember", payload).await?;
+        Ok(())
+    }
+
+    pub async fn delete_message(
+        &self,
+        chat_id: i64,
+        message_id: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let payload = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+        });
+        let _: bool = self.send_request( "deleteMessage", payload).await?;
+        Ok(())
+    }
+
+    pub async fn get_updates(
+        &self,
+        offset: u64,
+    ) -> Result<Vec<Update>, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!(
+            "{}{}/getUpdates?offset={}&timeout=60",
+            TELEGRAM_API_URL, &self.token, offset
+        );
+
+        // Debug: log the URL being called
+        debug!("Calling Telegram API: {}", url);
+
+        let response = self.client.get(&url).send().await?;
+        debug!("Received response from Telegram API: {:?}", response);
+        let status = response.status();
+        // Check if response status is OK
+        if !status.is_success() {
+            let content = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "No content".to_string());
+            return Err(format!("HTTP Error: {}. {}", status, content).into());
+        }
+
+        // Get response text for debugging
+        let response_text = response.text().await?;
+        debug!("Response text: {}", response_text);
+
+        // Try to parse the response
+        match serde_json::from_str::<TelegramResponse<Vec<Update>>>(&response_text) {
+            Ok(updates_response) => {
+                if updates_response.ok {
+                    Ok(updates_response.result)
+                } else {
+                    Err(updates_response
+                        .description
+                        .unwrap_or_else(|| "Unknown error".to_string())
+                        .into())
+                }
+            }
+            Err(parse_error) => {
+                // Log the response text that failed to parse
+                error!("Failed to parse response: {}", parse_error);
+                error!("Response text: {}", response_text);
+                Err(format!("Failed to parse Telegram API response: {}", parse_error).into())
+            }
         }
     }
 }

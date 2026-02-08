@@ -32,7 +32,7 @@ RUN apk add --update --no-cache \
     ca-certificates \
     curl \
     openssl \
-    tzdata~=2026 && \
+    tzdata~=2025 && \
     rm -rf /var/cache/apk && \
     rm -rf /var/lib/app/lists*
 
