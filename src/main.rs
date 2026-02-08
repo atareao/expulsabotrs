@@ -14,8 +14,11 @@ use time::macros::format_description;
 
 mod telegram;
 mod openobserve;
+mod matrix;
+
 use telegram::*;
-use openobserve::OpenObserve;
+use openobserve::{OpenObserve, UserEvent};
+use matrix::Matrix;
 
 // --- Bot Configuration Functions ---
 
@@ -98,9 +101,12 @@ async fn timer_task(
     chat_id: i64,
     user_id: i64,
     user_name: String,
+    chat_title: Option<String>,
     _challenge_message_id: u64,
     rx: oneshot::Receiver<()>, // Channel to receive signal for completion
     state: ChallengeState,
+    open_observe_client: Option<Arc<OpenObserve>>,
+    matrix_client: Option<Arc<Matrix>>,
 ) {
     let challenge_duration_minutes = env::var("CHALLENGE_DURATION_MINUTES")
         .unwrap_or_else(|_| "2".to_string())
@@ -128,6 +134,35 @@ async fn timer_task(
                         // Send a notification and collect message ID
                         if let Ok(msg_id) = telegram_client.send_message(chat_id, &format!("El usuario {} fue expulsado por no completar el desafío.", user_name)).await {
                             messages_to_delete.push(msg_id);
+                        }
+
+                        // Send event to OpenObserve
+                        if let Some(open_client) = &open_observe_client {
+                            let event = UserEvent {
+                                user_id,
+                                user_name: user_name.clone(),
+                                group_id: chat_id,
+                                group_name: chat_title.as_deref().unwrap_or("Unknown Group").to_string(),
+                                challenge_completed: false,
+                                banned: true,
+                            };
+                            if let Err(e) = open_client.send_user_event(&event).await {
+                                error!("Failed to send user event to OpenObserve: {:?}", e);
+                            }
+                        }
+
+                        // Send message to Matrix
+                        if let Some(matrix_client) = &matrix_client {
+                            let matrix_message = format!(
+                                "el usuario {} con id {} no superó el challenge y fue baneado del grupo {} con id {}",
+                                user_name,
+                                user_id,
+                                chat_title.as_deref().unwrap_or("Unknown Group"),
+                                chat_id
+                            );
+                            if let Err(e) = matrix_client.send_message(&matrix_message).await {
+                                error!("Failed to send message to Matrix: {:?}", e);
+                            }
                         }
                         
                         // Programar eliminación de mensajes después del tiempo configurado
@@ -168,7 +203,10 @@ async fn process_new_member(
     chat_id: i64,
     user_id: i64,
     first_name: &str,
+    chat_title: Option<String>,
     challenge_state: &ChallengeState,
+    open_observe_client: Option<Arc<OpenObserve>>,
+    matrix_client: Option<Arc<Matrix>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     debug!(
         "Processing new member: User ID {} in chat {}",
@@ -251,6 +289,9 @@ async fn process_new_member(
             let state_clone = Arc::clone(&challenge_state);
             let telegram_client_clone = Arc::clone(&telegram_client);
             let first_name_clone = first_name.to_string();
+            let chat_title_clone = chat_title.clone();
+            let open_observe_clone = open_observe_client.clone();
+            let matrix_clone = matrix_client.clone();
 
             tokio::spawn(async move {
                 timer_task(
@@ -258,9 +299,12 @@ async fn process_new_member(
                     chat_id,
                     user_id,
                     first_name_clone,
+                    chat_title_clone,
                     message_id,
                     rx,
                     state_clone,
+                    open_observe_clone,
+                    matrix_clone,
                 )
                 .await;
             });
@@ -312,16 +356,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let telegram_client = Arc::new(Telegram::new(&token));
 
     let open_observe_url = env::var("OPEN_OBSERVE_URL").ok();
+    let open_observe_index = env::var("OPEN_OBSERVE_INDEX").ok();
     let open_observe_token = env::var("OPEN_OBSERVE_TOKEN").ok();
 
-    let open_client = if let Some(url) = open_observe_url {
-        if let Some(token) = open_observe_token {
-            Some(OpenObserve::new(&url, "telegram_bot_challenges", &token))
-        }else {
-            None
+    let open_client = match (open_observe_url, open_observe_token, open_observe_index) {
+        (Some(url), Some(token), Some(index)) => {
+            debug!("OpenObserve integration enabled with URL: {}", url);
+            Some(Arc::new(OpenObserve::new(&url, &index, &token)))
         }
-    } else {
-        None
+        _ => None,
+    };
+    let matrix_url = env::var("MATRIX_URL").ok();
+    let matrix_token = env::var("MATRIX_TOKEN").ok();
+    let matrix_room= env::var("MATRIX_ROOM").ok();
+
+    let matrix_client = match (matrix_url, matrix_token, matrix_room) {
+        (Some(url), Some(token), Some(room)) => {
+            debug!("Matrix integration enabled with URL: {}", url);
+            Some(Arc::new(Matrix::new(&url, &token, &room)))
+        }
+        _ => None,
     };
 
     let mut offset = 0u64;
@@ -391,7 +445,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                             new_member.id,
                                                             config.banned_bots_count
                                                         );
-                                                        if let Err(e) = telegram_client.send_message( message.chat.id, &notification_msg).await {
+                                                        if let Err(e) = telegram_client.send_message(message.chat.id, &notification_msg).await {
                                                             error!("Failed to send ban notification: {}", e);
                                                         }
                                                     }
@@ -501,7 +555,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     message.chat.id,
                                     user_id,
                                     &user_data.first_name,
+                                    message.chat.title.clone(),
                                     &challenge_state,
+                                    open_client.clone(),
+                                    matrix_client.clone(),
                                 )
                                 .await
                                 {
@@ -557,7 +614,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     bot_treatment
                                 );
                                 
-                                if telegram_client.send_message( message.chat.id, &help_text).await.is_err() {
+                                if telegram_client.send_message(message.chat.id, &help_text).await.is_err() {
                                     error!("Failed to send help message to chat {}", message.chat.id);
                                 }
                             } else if text.starts_with("/whitelist") {
@@ -573,10 +630,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         });
                                         if !config.whitelisted_bots.contains(&bot_id) {
                                             config.whitelisted_bots.push(bot_id);
-                                            if telegram_client.send_message( message.chat.id, &format!("✅ Bot {} agregado a la lista blanca", bot_id)).await.is_err() {
+                                            if telegram_client.send_message(message.chat.id, &format!("✅ Bot {} agregado a la lista blanca", bot_id)).await.is_err() {
                                                 error!("Failed to send whitelist confirmation");
                                             }
-                                        } else if telegram_client.send_message( message.chat.id, &format!("⚠️ Bot {} ya está en la lista blanca", bot_id)).await.is_err() {
+                                        } else if telegram_client.send_message(message.chat.id, &format!("⚠️ Bot {} ya está en la lista blanca", bot_id)).await.is_err() {
                                                 error!("Failed to send whitelist warning");
                                         }
                                     }
@@ -648,7 +705,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 chat_id,
                                 user_id,
                                 &chat_member_update.new_chat_member.user.first_name,
+                                chat_member_update.chat.title.clone(),
                                 &challenge_state,
+                                open_client.clone(),
+                                matrix_client.clone(),
                             )
                             .await
                             {
@@ -698,6 +758,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                             }
                                         }
 
+                                        // Send success event to OpenObserve
+                                        if let Some(open_client) = &open_client {
+                                            let event = UserEvent {
+                                                user_id,
+                                                user_name: callback_query.from.first_name.clone(),
+                                                group_id: chat_id,
+                                                group_name: message.chat.title.as_deref().unwrap_or("Unknown Group").to_string(),
+                                                challenge_completed: true,
+                                                banned: false,
+                                            };
+                                            if let Err(e) = open_client.send_user_event(&event).await {
+                                                error!("Failed to send user event to OpenObserve: {:?}", e);
+                                            }
+                                        }
+
+                                        // Send message to Matrix
+                                        if let Some(matrix_client) = &matrix_client {
+                                            let matrix_message = format!(
+                                                "el usuario {} con id {} si superó el challenge y no fue baneado del grupo {} con id {}",
+                                                callback_query.from.first_name,
+                                                user_id,
+                                                message.chat.title.as_deref().unwrap_or("Unknown Group"),
+                                                chat_id
+                                            );
+                                            if let Err(e) = matrix_client.send_message(&matrix_message).await {
+                                                error!("Failed to send message to Matrix: {:?}", e);
+                                            }
+                                        }
+
                                         // Programar eliminación de mensajes después de 30 segundos
                                         delete_messages_after_delay(
                                             telegram_client.clone(),
@@ -732,6 +821,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                 "Failed to ban user {} after incorrect answer: {}",
                                                 user_id, "Error"
                                             );
+                                        }
+
+                                        // Send failure event to OpenObserve
+                                        if let Some(open_client) = &open_client {
+                                            let event = UserEvent {
+                                                user_id,
+                                                user_name: callback_query.from.first_name.clone(),
+                                                group_id: chat_id,
+                                                group_name: message.chat.title.as_deref().unwrap_or("Unknown Group").to_string(),
+                                                challenge_completed: false,
+                                                banned: true,
+                                            };
+                                            if let Err(e) = open_client.send_user_event(&event).await {
+                                                error!("Failed to send user event to OpenObserve: {:?}", e);
+                                            }
+                                        }
+
+                                        // Send message to Matrix
+                                        if let Some(matrix_client) = &matrix_client {
+                                            let matrix_message = format!(
+                                                "el usuario {} con id {} no superó el challenge y fue baneado del grupo {} con id {}",
+                                                callback_query.from.first_name,
+                                                user_id,
+                                                message.chat.title.as_deref().unwrap_or("Unknown Group"),
+                                                chat_id
+                                            );
+                                            if let Err(e) = matrix_client.send_message(&matrix_message).await {
+                                                error!("Failed to send message to Matrix: {:?}", e);
+                                            }
                                         }
                                         
                                         // Programar eliminación de mensajes después de 30 segundos

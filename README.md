@@ -3,6 +3,8 @@
 [![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 [![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://telegram.org/)
+[![OpenObserve](https://img.shields.io/badge/OpenObserve-FF6B35?style=for-the-badge&logo=elasticsearch&logoColor=white)](https://openobserve.ai/)
+[![Matrix](https://img.shields.io/badge/Matrix-000000?style=for-the-badge&logo=matrix&logoColor=white)](https://matrix.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)](https://github.com/atareao/expulsabot)
@@ -10,9 +12,9 @@
 [![Rust Version](https://img.shields.io/badge/rust-1.70+-orange?style=flat-square)](https://www.rust-lang.org/)
 [![Docker Image](https://img.shields.io/badge/docker-atareao/expulsabot-blue?style=flat-square)](https://hub.docker.com/r/atareao/expulsabot)
 
-> 🛡️ **Bot de Telegram avanzado para protección anti-bot y verificación de usuarios**
+> 🛡️ **Bot de Telegram avanzado para protección anti-bot, verificación de usuarios y monitoreo integral**
 
-ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protección automática contra bots maliciosos y sistema de verificación inteligente para nuevos miembros de grupos.
+ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protección automática contra bots maliciosos, sistema de verificación inteligente para nuevos miembros de grupos, y registro completo de eventos en OpenObserve y Matrix.
 
 ---
 
@@ -39,6 +41,13 @@ ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protecció
 - 📊 **Comandos administrativos** completos
 - 🕐 **Zona horaria Europe/Madrid**
 
+### 📊 **Monitoreo y Analytics**
+
+- 📈 **OpenObserve Integration** - Eventos JSON estructurados para análisis
+- 💬 **Matrix Integration** - Notificaciones en tiempo real
+- 📋 **Event Logging** - Registro completo de actividades de usuarios
+- 🔍 **Estadísticas detalladas** de comportamiento de grupo
+
 ---
 
 ## 🚀 **Inicio Rápido**
@@ -58,6 +67,16 @@ TOKEN=tu_bot_token_aquí
 CHALLENGE_DURATION_MINUTES=2
 BAN_BOTS_DIRECTLY=true
 MESSAGE_CLEANUP_DELAY_SECONDS=30
+
+# OpenObserve Integration (Opcional)
+OPEN_OBSERVE_URL=tu_openobserve_url
+OPEN_OBSERVE_TOKEN=tu_openobserve_token
+OPEN_OBSERVE_INDEX=telegram_bot_events
+
+# Matrix Integration (Opcional)
+MATRIX_URL=tu_matrix_server
+MATRIX_TOKEN=tu_matrix_access_token
+MATRIX_ROOM=!roomId:server.com
 ```
 
 3. **Ejecuta con Docker Compose:**
@@ -106,6 +125,22 @@ cargo build --release
 | `TZ`                            | Zona horaria                    | `Europe/Madrid` | ❌        |
 | `RUST_LOG`                      | Nivel de logging                | `INFO`          | ❌        |
 
+### 📊 **Variables de OpenObserve** (Opcional)
+
+| Variable             | Descripción                     | Ejemplo                           |
+| -------------------- | ------------------------------- | --------------------------------- |
+| `OPEN_OBSERVE_URL`   | URL de tu instancia OpenObserve | `https://openobserve.example.com` |
+| `OPEN_OBSERVE_TOKEN` | Token de acceso OpenObserve     | `Basic dXNlcjpwYXNz...`           |
+| `OPEN_OBSERVE_INDEX` | Índice donde guardar eventos    | `telegram_bot_events`             |
+
+### 💬 **Variables de Matrix** (Opcional)
+
+| Variable       | Descripción                    | Ejemplo                      |
+| -------------- | ------------------------------ | ---------------------------- |
+| `MATRIX_URL`   | Servidor Matrix (sin https://) | `matrix.example.com`         |
+| `MATRIX_TOKEN` | Token de acceso Matrix         | `syt_dXNlcm5hbWU_xyz...`     |
+| `MATRIX_ROOM`  | ID de sala Matrix              | `!roomId:matrix.example.com` |
+
 ---
 
 ## 🐳 **Docker**
@@ -147,6 +182,31 @@ docker pull atareao/expulsabot:latest
 - **Fallo**: `"Ese no es el animal correcto."` → 🗑️ 30s
 - **Timeout**: `"El usuario Juan fue expulsado..."` → 🗑️ 30s
 
+### **Sistema de Monitoreo Integral**
+
+#### 📊 **OpenObserve Analytics**
+
+Cada evento de usuario se registra como JSON estructurado:
+
+```json
+{
+  "user_id": 123456789,
+  "user_name": "Juan Pérez",
+  "group_id": -987654321,
+  "group_name": "Mi Grupo de Telegram",
+  "challenge_completed": true,
+  "banned": false
+}
+```
+
+#### 💬 **Matrix Notifications**
+
+Mensajes en tiempo real enviados a Matrix:
+
+- ✅ **Challenge exitoso**: `"el usuario Juan Pérez con id 123456789 si superó el challenge y no fue baneado del grupo Mi Grupo con id -987654321"`
+- ❌ **Challenge fallido**: `"el usuario Juan Pérez con id 123456789 no superó el challenge y fue baneado del grupo Mi Grupo con id -987654321"`
+- ⏰ **Timeout**: `"el usuario Juan Pérez con id 123456789 no superó el challenge y fue baneado del grupo Mi Grupo con id -987654321"`
+
 ---
 
 ## 🔧 **Desarrollo**
@@ -155,10 +215,12 @@ docker pull atareao/expulsabot:latest
 
 - **🦀 Rust 2021** - Lenguaje principal
 - **⚡ Tokio** - Runtime asíncrono
-- **🌐 Reqwest** - Cliente HTTP para Telegram API
+- **🌐 Reqwest** - Cliente HTTP para APIs (Telegram, OpenObserve, Matrix)
 - **📝 Serde** - Serialización JSON
 - **🔍 Tracing** - Sistema de logging
 - **🎲 Rand** - Generación aleatoria para desafíos
+- **📊 OpenObserve** - Analytics y monitoreo de eventos
+- **💬 Matrix** - Notificaciones en tiempo real
 
 ### **Estructura del Proyecto**
 
@@ -166,7 +228,9 @@ docker pull atareao/expulsabot:latest
 expulsabot/
 ├── src/
 │   ├── main.rs           # Lógica principal del bot
-│   └── telegram.rs       # Estructuras y API de Telegram
+│   ├── telegram.rs       # Estructuras y API de Telegram
+│   ├── openobserve.rs    # Integración con OpenObserve
+│   └── matrix.rs         # Integración con Matrix
 ├── Cargo.toml           # Dependencias de Rust
 ├── Dockerfile           # Imagen Docker multi-etapa
 ├── compose.yml          # Configuración Docker Compose
@@ -222,7 +286,9 @@ Este proyecto está bajo la Licencia MIT. Ver el archivo [LICENSE](LICENSE) para
 - 📚 [Documentación de Telegram Bot API](https://core.telegram.org/bots/api)
 - 🦀 [Documentación de Rust](https://doc.rust-lang.org/)
 - 🐳 [Docker Hub](https://hub.docker.com/r/atareao/expulsabot)
-- 📋 [Changelog](CHANGELOG.md)
+- � [OpenObserve Documentation](https://openobserve.ai/docs/)
+- 💬 [Matrix.org](https://matrix.org/)
+- �📋 [Changelog](CHANGELOG.md)
 - 🐛 [Reportar Bug](https://github.com/atareao/expulsabot/issues)
 
 ---

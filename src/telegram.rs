@@ -146,7 +146,6 @@ pub struct Telegram {
 }
 
 impl Telegram {
-
     pub fn new(token: &str) -> Self {
         Telegram {
             client: Client::new(),
@@ -209,7 +208,7 @@ impl Telegram {
             "parse_mode": "HTML",
             "reply_markup": serde_json::to_value(keyboard)?,
         });
-        self.send_request( "sendMessage", payload)
+        self.send_request("sendMessage", payload)
             .await
             .map(|result: SentMessageResult| result.message_id)
     }
@@ -234,7 +233,7 @@ impl Telegram {
             "use_independent_chat_permissions": false,
             "until_date": 0
         });
-        let _: bool = self.send_request( "restrictChatMember", payload).await?;
+        let _: bool = self.send_request("restrictChatMember", payload).await?;
         Ok(())
     }
 
@@ -258,7 +257,7 @@ impl Telegram {
             "use_independent_chat_permissions": false,
             "until_date": 0
         });
-        let _: bool = self.send_request( "restrictChatMember", payload).await?;
+        let _: bool = self.send_request("restrictChatMember", payload).await?;
         Ok(())
     }
 
@@ -285,7 +284,7 @@ impl Telegram {
             "chat_id": chat_id,
             "message_id": message_id,
         });
-        let _: bool = self.send_request( "deleteMessage", payload).await?;
+        let _: bool = self.send_request("deleteMessage", payload).await?;
         Ok(())
     }
 
