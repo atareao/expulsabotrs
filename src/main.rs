@@ -599,8 +599,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 };
                                 
                                 let help_text = format!(
-                                    "🤖 **ExpulsaBot - Protección Anti-Bot**\n\n\
-                                    📋 **Comandos disponibles:**\n\
+                                    "🤖 ExpulsaBot - Protección Anti-Bot\n\n\
+                                    📋 Comandos disponibles:\n\
                                     • /start - Iniciar el bot\n\
                                     • /help - Ver esta ayuda\n\
                                     • /whitelist <bot_id> - Permitir bot específico\n\
