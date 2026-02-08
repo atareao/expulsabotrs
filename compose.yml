@@ -1,0 +1,13 @@
+services:
+  expulsabot:
+    image: atareao/expulsabot:latest
+    container_name: expulsabot
+    init: true
+    restart: unless-stopped
+    environment:
+      RUST_LOG: DEBUG
+      TOKEN: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+      CHALLENGE_DURATION_MINUTES: 2
+      BAN_BOTS_DIRECTLY: true
+      MESSAGE_CLEANUP_DELAY_SECONDS: 30
+      TZ: Europe/Madrid
