@@ -46,19 +46,9 @@ async fn get_or_create_bot_config(config_state: &BotConfigState, chat_id: i64) -
     let mut state = config_state.lock().await;
     state.entry(chat_id).or_insert_with(|| BotConfig {
         whitelisted_bots: Vec::new(),
-        admin_users: Vec::new(),
         notify_on_ban: true,
         banned_bots_count: 0,
     }).clone()
-}
-
-async fn is_user_admin(config_state: &BotConfigState, chat_id: i64, user_id: i64) -> bool {
-    let state = config_state.lock().await;
-    if let Some(config) = state.get(&chat_id) {
-        config.admin_users.contains(&user_id)
-    } else {
-        false
-    }
 }
 
 // --- Challenge Specific Functions ---
@@ -77,7 +67,6 @@ type ChallengeState = Arc<Mutex<HashMap<i64, HashMap<i64, ChallengeDetails>>>>;
 #[derive(Clone, Debug)]
 struct BotConfig {
     whitelisted_bots: Vec<i64>,  // IDs de bots permitidos
-    admin_users: Vec<i64>,       // IDs de administradores
     notify_on_ban: bool,         // Notificar cuando se expulsa un bot
     banned_bots_count: u64,      // Estadísticas de bots expulsados
 }
@@ -333,6 +322,10 @@ async fn process_new_member(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     dotenv().ok(); // Load environment variables from .env file
+    
+    // Record start time for status command
+    let start_time = Instant::now();
+    
     // El formato que querías
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     
@@ -432,7 +425,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                     let mut state = bot_config_state.lock().await;
                                                     let config = state.entry(message.chat.id).or_insert_with(|| BotConfig {
                                                         whitelisted_bots: Vec::new(),
-                                                        admin_users: Vec::new(),
                                                         notify_on_ban: true,
                                                         banned_bots_count: 0,
                                                     });
@@ -574,20 +566,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 message.chat.id, text, message.from.first_name
                             );
 
-                            if text.starts_with("/start") {
-                                if telegram_client.send_message(
-                                    message.chat.id,
-                                    "¡Hola! Soy tu bot de Telegram. Úsame para administrar el acceso al grupo.",
-                                )
-                                .await
-                                .is_err()
-                                {
-                                    error!(
-                                        "Failed to send start message to chat {}",
-                                        message.chat.id
-                                    );
+                            // Check if message is a command
+                            if text.starts_with("/") {
+                                let user_id = message.from.id;
+                                let chat_id = message.chat.id;
+
+                                // For all commands, check if user is admin using Telegram API
+                                match telegram_client.is_chat_admin(chat_id, user_id).await {
+                                    Ok(is_admin) => {
+                                        if !is_admin {
+                                            if telegram_client.send_message(chat_id, "❌ Solo los administradores del grupo pueden usar comandos del bot").await.is_err() {
+                                                error!("Failed to send permission denied message");
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to check admin status for user {}: {}", user_id, e);
+                                        if telegram_client.send_message(chat_id, "❌ Error al verificar permisos de administrador").await.is_err() {
+                                            error!("Failed to send admin check error message");
+                                        }
+                                        continue;
+                                    }
                                 }
-                            } else if text.starts_with("/help") {
+
+                                // Process admin-only commands
+                                if text.starts_with("/start") {
+                                    if telegram_client.send_message(
+                                        message.chat.id,
+                                        "¡Hola! Soy tu bot de Telegram. Úsame para administrar el acceso al grupo.",
+                                    )
+                                    .await
+                                    .is_err()
+                                    {
+                                        error!(
+                                            "Failed to send start message to chat {}",
+                                            message.chat.id
+                                        );
+                                    }
+                                } else if text.starts_with("/help") {
                                 let ban_bots_directly = env::var("BAN_BOTS_DIRECTLY")
                                     .unwrap_or_else(|_| "true".to_string())
                                     .to_lowercase() == "true";
@@ -599,23 +616,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 };
                                 
                                 let help_text = format!(
-                                    "🤖 ExpulsaBot - Protección Anti-Bot\n\n\
-                                    📋 Comandos disponibles:\n\
+                                    "🤖 <b>ExpulsaBot - Protección Anti-Bot</b>\n\n\
+                                    📋 <b>Comandos disponibles:</b>\n\
                                     • /start - Iniciar el bot\n\
                                     • /help - Ver esta ayuda\n\
-                                    • /whitelist <bot_id> - Permitir bot específico\n\
-                                    • /unwhitelist <bot_id> - Remover bot de lista blanca\n\
+                                    • /status - Ver estado del bot\n\
+                                    • /whitelist &lt;bot_id&gt; - Permitir bot específico\n\
+                                    • /unwhitelist &lt;bot_id&gt; - Remover bot de lista blanca\n\
                                     • /stats - Ver estadísticas del grupo\n\
-                                    • /notify <on|off> - Activar/desactivar notificaciones\n\n\
-                                    🔧 **Configuración actual:**\n\
+                                    • /notify &lt;on|off&gt; - Activar/desactivar notificaciones\n\n\
+                                    🔧 <b>Configuración actual:</b>\n\
                                     {}\n\n\
-                                    👤 **Para usuarios humanos:**\n\
+                                    ⚠️ <b>Importante:</b>\n\
+                                    Solo los administradores de Telegram pueden usar comandos del bot.\n\n\
+                                    👤 <b>Para usuarios humanos:</b>\n\
                                     Los nuevos miembros serán desafiados para verificar que no son bots.",
                                     bot_treatment
                                 );
                                 
                                 if telegram_client.send_message(message.chat.id, &help_text).await.is_err() {
                                     error!("Failed to send help message to chat {}", message.chat.id);
+                                }
+                            } else if text.starts_with("/status") {
+                                let uptime = start_time.elapsed();
+                                let total_seconds = uptime.as_secs();
+                                
+                                let status_text = if total_seconds < 60 {
+                                    format!("🟢 <b>Bot Estado:</b> Activo\n⏱️ <b>Tiempo en línea:</b> {} segundos", total_seconds)
+                                } else if total_seconds < 3600 {
+                                    let minutes = total_seconds / 60;
+                                    let seconds = total_seconds % 60;
+                                    format!("🟢 <b>Bot Estado:</b> Activo\n⏱️ <b>Tiempo en línea:</b> {} minutos y {} segundos", minutes, seconds)
+                                } else if total_seconds < 86400 {
+                                    let hours = total_seconds / 3600;
+                                    let minutes = (total_seconds % 3600) / 60;
+                                    format!("🟢 <b>Bot Estado:</b> Activo\n⏱️ <b>Tiempo en línea:</b> {} horas y {} minutos", hours, minutes)
+                                } else {
+                                    let days = total_seconds / 86400;
+                                    let hours = (total_seconds % 86400) / 3600;
+                                    format!("🟢 <b>Bot Estado:</b> Activo\n⏱️ <b>Tiempo en línea:</b> {} días y {} horas", days, hours)
+                                };
+                                
+                                if telegram_client.send_message(message.chat.id, &status_text).await.is_err() {
+                                    error!("Failed to send status message to chat {}", message.chat.id);
                                 }
                             } else if text.starts_with("/whitelist") {
                                 let parts: Vec<&str> = text.split_whitespace().collect();
@@ -624,7 +667,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         let mut state = bot_config_state.lock().await;
                                         let config = state.entry(message.chat.id).or_insert_with(|| BotConfig {
                                             whitelisted_bots: Vec::new(),
-                                            admin_users: Vec::new(),
                                             notify_on_ban: true,
                                             banned_bots_count: 0,
                                         });
@@ -662,7 +704,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             } else if text.starts_with("/stats") {
                                 let config = get_or_create_bot_config(&bot_config_state, message.chat.id).await;
                                 let stats_msg = format!(
-                                    "📊 **Estadísticas Anti-Bot**\n🤖 Bots expulsados: {}\n📝 Bots en lista blanca: {}\n🔔 Notificaciones: {}",
+                                    "📊 <b>Estadísticas Anti-Bot</b>\n🤖 Bots expulsados: {}\n📝 Bots en lista blanca: {}\n🔔 Notificaciones: {}",
                                     config.banned_bots_count,
                                     config.whitelisted_bots.len(),
                                     if config.notify_on_ban { "Activadas" } else { "Desactivadas" }
@@ -677,7 +719,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     let mut state = bot_config_state.lock().await;
                                     let config = state.entry(message.chat.id).or_insert_with(|| BotConfig {
                                         whitelisted_bots: Vec::new(),
-                                        admin_users: Vec::new(),
                                         notify_on_ban: true,
                                         banned_bots_count: 0,
                                     });
@@ -689,6 +730,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 } else if telegram_client.send_message(message.chat.id, "Uso: /notify <on|off>").await.is_err() {
                                         error!("Failed to send notify usage");
                                 }
+                            }
                             }
                         }
                     } else if let Some(chat_member_update) = update.chat_member {

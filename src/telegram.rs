@@ -1,7 +1,6 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
-use tracing_subscriber::field::debug;
 
 pub const TELEGRAM_API_URL: &str = "https://api.telegram.org/bot";
 
@@ -335,5 +334,20 @@ impl Telegram {
                 Err(format!("Failed to parse Telegram API response: {}", parse_error).into())
             }
         }
+    }
+
+    pub async fn is_chat_admin(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let payload = serde_json::json!({
+            "chat_id": chat_id,
+            "user_id": user_id,
+        });
+
+        let chat_member: Member = self.send_request("getChatMember", payload).await?;
+
+        Ok(chat_member.status == "administrator" || chat_member.status == "creator")
     }
 }
