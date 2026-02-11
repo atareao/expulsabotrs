@@ -1,7 +1,13 @@
-user    := "atareao"
-name    := "expulsabotrs"
-version := `vampus show`
+user      := "atareao"
+name      := "expulsabotrs"
+version   := `vampus show`
+go_format := '{{.Repository}}:{{.Tag}}'
 
+# list all commands
+list:
+    @just --list
+
+# build and tag
 build:
     echo {{version}}
     echo {{name}}
@@ -9,11 +15,21 @@ build:
                  -t {{user}}/{{name}}:latest \
                  .
 
+# tag latest
 tag:
     docker tag {{user}}/{{name}}:{{version}} {{user}}/{{name}}:latest
 
+# push all tags
 push:
     docker push --all-tags {{user}}/{{name}}
+
+# remove images
+rmi:
+    docker images --format "{{go_format}}" --filter "reference=atareao/expulsabotrs" | tail -n +4 | xargs -r docker rmi
+
+# list images
+lsi:
+    docker images --format "{{go_format}}" --filter "reference=atareao/expulsabotrs"
 
 buildx:
     #!/usr/bin/env bash

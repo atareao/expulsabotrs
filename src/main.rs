@@ -4,7 +4,7 @@ use std::env;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 use tracing_subscriber::{
     fmt::time::LocalTime,
     EnvFilter,
@@ -88,7 +88,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let challenge_state: ChallengeState = Arc::new(Mutex::new(HashMap::new()));
     let bot_config_state: BotConfigState = Arc::new(Mutex::new(HashMap::new()));
 
-    debug!("🚀 Bot started. Listening for updates...");
+    let version = env!("CARGO_PKG_VERSION");
+    info!("🚀🚀🚀 Bot started 🚀🚀🚀");
+    info!("📋 ExpulsaBot v{} initialized successfully", version);
+    info!("👂️ Listening for updates...");
 
     loop {
         match telegram_client.get_updates( offset).await {

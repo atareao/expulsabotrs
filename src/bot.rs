@@ -315,7 +315,7 @@ pub async fn process_new_member(
         .unwrap_or(2);
 
     let challenge_text = format!(
-        "¡Bienvenido, <b>{}</b>!\nPara confirmar que eres un ser humano, resuelve el enigma,\n{}\n\nTienes {} minutos.",
+        "¡Bienvenido, <b>{}</b>!\nPara confirmar que eres un ser humano, supera el desafío,\n{}\n\nTienes {} minutos.",
         first_name,
         problem_text,
         challenge_duration_minutes
