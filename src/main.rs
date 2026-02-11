@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let bot_config_state: BotConfigState = Arc::new(Mutex::new(HashMap::new()));
 
     let version = env!("CARGO_PKG_VERSION");
-    info!("🚀🚀🚀 Bot started 🚀🚀🚀");
+    info!("🚀 Bot started");
     info!("📋 ExpulsaBot v{} initialized successfully", version);
     info!("👂️ Listening for updates...");
 
