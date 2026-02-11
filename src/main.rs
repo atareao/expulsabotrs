@@ -1,10 +1,9 @@
 use dotenv::dotenv;
-use rand::prelude::IndexedRandom;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use tokio::sync::{oneshot, Mutex};
-use tokio::time::{sleep, Duration, Instant};
+use tokio::sync::Mutex;
+use tokio::time::{Duration, Instant};
 use tracing::{debug, error};
 use tracing_subscriber::{
     fmt::time::LocalTime,
@@ -15,309 +14,22 @@ use time::macros::format_description;
 mod telegram;
 mod openobserve;
 mod matrix;
+mod bot;
+mod commands;
+#[cfg(test)]
+mod challenge_tests;
 
 use telegram::*;
 use openobserve::{OpenObserve, UserEvent};
 use matrix::Matrix;
+use bot::{
+    BotConfig, BotConfigState, ChallengeState,
+    delete_messages_after_delay, get_or_create_bot_config, 
+    process_new_member
+};
+use commands::handle_command;
 
-// --- Bot Configuration Functions ---
 
-async fn delete_messages_after_delay(
-    telegram_client: Arc<Telegram>,
-    chat_id: i64,
-    message_ids: Vec<u64>,
-    delay_seconds: u64,
-) {
-    let telegram_client = Arc::clone(&telegram_client); // Clonamos el puntero, no el objeto entero
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(delay_seconds)).await;
-        
-        for message_id in message_ids {
-            if let Err(e) = telegram_client.delete_message(chat_id, message_id).await {
-                debug!("Failed to delete cleanup message {}: {}", message_id, e);
-            } else {
-                debug!("Cleanup: deleted message {} after {} seconds", message_id, delay_seconds);
-            }
-        }
-    });
-}
-
-async fn get_or_create_bot_config(config_state: &BotConfigState, chat_id: i64) -> BotConfig {
-    let mut state = config_state.lock().await;
-    state.entry(chat_id).or_insert_with(|| BotConfig {
-        whitelisted_bots: Vec::new(),
-        notify_on_ban: true,
-        banned_bots_count: 0,
-    }).clone()
-}
-
-// --- Challenge Specific Functions ---
-
-struct ChallengeDetails {
-    correct_animal_name: String,
-    challenge_message_id: u64,
-    start_time: Instant,
-    tx: oneshot::Sender<()>, // Channel to signal completion or timeout
-}
-
-// State: Map of chat_id -> (Map of user_id -> ChallengeDetails)
-type ChallengeState = Arc<Mutex<HashMap<i64, HashMap<i64, ChallengeDetails>>>>;
-
-// Bot whitelist and admin configuration
-#[derive(Clone, Debug)]
-struct BotConfig {
-    whitelisted_bots: Vec<i64>,  // IDs de bots permitidos
-    notify_on_ban: bool,         // Notificar cuando se expulsa un bot
-    banned_bots_count: u64,      // Estadísticas de bots expulsados
-}
-
-type BotConfigState = Arc<Mutex<HashMap<i64, BotConfig>>>; // Por chat
-
-// Define animal emojis and names for the challenge
-const CHALLENGE_ANIMALS: &[(&str, &str)] = &[
-    ("🐧", "penguin"),
-    ("🐳", "whale"),
-    ("🦀", "crab"),
-    ("🦊", "fox"),
-    ("🦭", "seal"),
-    ("🐍", "snake"),
-];
-
-// --- Timer Task ---
-
-async fn timer_task(
-    telegram_client: Arc<Telegram>,
-    chat_id: i64,
-    user_id: i64,
-    user_name: String,
-    chat_title: Option<String>,
-    _challenge_message_id: u64,
-    rx: oneshot::Receiver<()>, // Channel to receive signal for completion
-    state: ChallengeState,
-    open_observe_client: Option<Arc<OpenObserve>>,
-    matrix_client: Option<Arc<Matrix>>,
-) {
-    let challenge_duration_minutes = env::var("CHALLENGE_DURATION_MINUTES")
-        .unwrap_or_else(|_| "2".to_string())
-        .parse::<u64>()
-        .unwrap_or(2);
-    let challenge_duration = Duration::from_secs(challenge_duration_minutes * 60);
-
-    let timer = sleep(challenge_duration);
-    tokio::select! {
-        _ = timer => {
-            // Timer expired
-            debug!("Challenge timer expired for user {} in chat {}", user_id, chat_id);
-            let mut state_guard = state.lock().await;
-
-            if let Some(user_challenges) = state_guard.get_mut(&chat_id) {
-                if let Some(challenge) = user_challenges.get(&user_id) {
-
-                    debug!("User {} did not respond in time. Banning.", user_id);
-                    // Ban user
-                    if let Err(e) = telegram_client.ban_chat_member(chat_id, user_id).await {
-                        error!("Failed to ban user {}: {}", user_id, e);
-                    } else {
-                        let mut messages_to_delete = vec![challenge.challenge_message_id];
-                        
-                        // Send a notification and collect message ID
-                        if let Ok(msg_id) = telegram_client.send_message(chat_id, &format!("El usuario {} fue expulsado por no completar el desafío.", user_name)).await {
-                            messages_to_delete.push(msg_id);
-                        }
-
-                        // Send event to OpenObserve
-                        if let Some(open_client) = &open_observe_client {
-                            let event = UserEvent {
-                                user_id,
-                                user_name: user_name.clone(),
-                                group_id: chat_id,
-                                group_name: chat_title.as_deref().unwrap_or("Unknown Group").to_string(),
-                                challenge_completed: false,
-                                banned: true,
-                            };
-                            if let Err(e) = open_client.send_user_event(&event).await {
-                                error!("Failed to send user event to OpenObserve: {:?}", e);
-                            }
-                        }
-
-                        // Send message to Matrix
-                        if let Some(matrix_client) = &matrix_client {
-                            let matrix_message = format!(
-                                "el usuario {} con id {} no superó el challenge y fue baneado del grupo {} con id {}",
-                                user_name,
-                                user_id,
-                                chat_title.as_deref().unwrap_or("Unknown Group"),
-                                chat_id
-                            );
-                            if let Err(e) = matrix_client.send_message(&matrix_message).await {
-                                error!("Failed to send message to Matrix: {:?}", e);
-                            }
-                        }
-                        
-                        // Programar eliminación de mensajes después del tiempo configurado
-                        let cleanup_delay = env::var("MESSAGE_CLEANUP_DELAY_SECONDS")
-                            .unwrap_or_else(|_| "30".to_string())
-                            .parse::<u64>()
-                            .unwrap_or(30);
-                            
-                        delete_messages_after_delay(
-                            telegram_client.clone(),
-                            chat_id,
-                            messages_to_delete,
-                            cleanup_delay,
-                        ).await;
-                    }
-
-                    // Remove from state
-                    user_challenges.remove(&user_id);
-                    // Clean up chat entry if no more users
-                    if user_challenges.is_empty() {
-                        state_guard.remove(&chat_id);
-                    }
-                }
-            }
-        },
-        _ = rx => {
-            // Challenge completed by user selecting a button
-            debug!("Challenge completed by user {} in chat {}", user_id, chat_id);
-            // The completion logic is handled in the callback query handler.
-            // This branch is reached when the callback handler successfully signals completion.
-        }
-    }
-}
-
-// Function to process new members (both from chat_member updates and new_chat_members)
-async fn process_new_member(
-    telegram_client: Arc<Telegram>,
-    chat_id: i64,
-    user_id: i64,
-    first_name: &str,
-    chat_title: Option<String>,
-    challenge_state: &ChallengeState,
-    open_observe_client: Option<Arc<OpenObserve>>,
-    matrix_client: Option<Arc<Matrix>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    debug!(
-        "Processing new member: User ID {} in chat {}",
-        user_id, chat_id
-    );
-
-    if telegram_client.restrict_chat_member(chat_id, user_id)
-        .await
-        .is_err()
-    {
-        error!(
-            "Failed to restrict chat member {} in chat {}",
-            user_id, chat_id
-        );
-        return Err("Failed to restrict member".into());
-    }
-    debug!("Permissions restricted for user {}", user_id);
-
-    let mut rng = rand::rng();
-    let (correct_emoji, correct_animal_name): (&str, &str) =
-        *CHALLENGE_ANIMALS.choose(&mut rng).unwrap();
-
-    let mut keyboard_buttons = Vec::new();
-    for (emoji, animal_name) in CHALLENGE_ANIMALS {
-        keyboard_buttons.push(InlineKeyboardButton {
-            text: emoji.to_string(),
-            url: None,
-            callback_data: Some(animal_name.to_string()),
-        });
-    }
-
-    let mut inline_keyboard = Vec::new();
-    let mut row = Vec::new();
-    for button in keyboard_buttons {
-        row.push(button);
-        if row.len() == 2 {
-            inline_keyboard.push(row);
-            row = Vec::new();
-        }
-    }
-    if !row.is_empty() {
-        inline_keyboard.push(row);
-    }
-    let markup = InlineKeyboardMarkup { inline_keyboard };
-
-    let challenge_duration_minutes = env::var("CHALLENGE_DURATION_MINUTES")
-        .unwrap_or_else(|_| "2".to_string())
-        .parse::<u64>()
-        .unwrap_or(2);
-
-    let challenge_text = format!(
-        "¡Bienvenido, <b>{}</b>!\nPara confirmar que eres un ser humano, selecciona este animal: {}\n\nTienes {} minutos.",
-        first_name,
-        correct_emoji,
-        challenge_duration_minutes
-    );
-
-    match telegram_client.send_message_with_keyboard(chat_id, &challenge_text, markup).await {
-        Ok(message_id) => {
-            debug!(
-                "Challenge message sent to user {} in chat {}: Message ID {}",
-                user_id, chat_id, message_id
-            );
-
-            let (tx, rx) = oneshot::channel();
-            let challenge_details = ChallengeDetails {
-                correct_animal_name: correct_animal_name.to_string(),
-                challenge_message_id: message_id,
-                start_time: Instant::now(),
-                tx,
-            };
-
-            let mut state_guard = challenge_state.lock().await;
-            state_guard
-                .entry(chat_id)
-                .or_default()
-                .insert(user_id, challenge_details);
-            drop(state_guard);
-
-            let state_clone = Arc::clone(&challenge_state);
-            let telegram_client_clone = Arc::clone(&telegram_client);
-            let first_name_clone = first_name.to_string();
-            let chat_title_clone = chat_title.clone();
-            let open_observe_clone = open_observe_client.clone();
-            let matrix_clone = matrix_client.clone();
-
-            tokio::spawn(async move {
-                timer_task(
-                    telegram_client_clone,
-                    chat_id,
-                    user_id,
-                    first_name_clone,
-                    chat_title_clone,
-                    message_id,
-                    rx,
-                    state_clone,
-                    open_observe_clone,
-                    matrix_clone,
-                )
-                .await;
-            });
-
-            Ok(())
-        }
-        Err(e) => {
-            error!(
-                "Failed to send challenge message for user {}: {}",
-                user_id, e
-            );
-            if telegram_client.unrestrict_chat_member(chat_id, user_id)
-                .await
-                .is_err()
-            {
-                error!(
-                    "Failed to unrestrict user {} after failed challenge message: {}",
-                    user_id, e
-                );
-            }
-            Err(e)
-        }
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -571,166 +283,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 let user_id = message.from.id;
                                 let chat_id = message.chat.id;
 
-                                // For all commands, check if user is admin using Telegram API
-                                match telegram_client.is_chat_admin(chat_id, user_id).await {
-                                    Ok(is_admin) => {
-                                        if !is_admin {
-                                            if telegram_client.send_message(chat_id, "❌ Solo los administradores del grupo pueden usar comandos del bot").await.is_err() {
-                                                error!("Failed to send permission denied message");
-                                            }
-                                            continue;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to check admin status for user {}: {}", user_id, e);
-                                        if telegram_client.send_message(chat_id, "❌ Error al verificar permisos de administrador").await.is_err() {
-                                            error!("Failed to send admin check error message");
-                                        }
-                                        continue;
-                                    }
+                                // Handle command using the dedicated commands module
+                                if let Err(e) = handle_command(
+                                    &text,
+                                    chat_id,
+                                    user_id,
+                                    &telegram_client,
+                                    &bot_config_state,
+                                    &start_time,
+                                ).await {
+                                    debug!("Command handling failed: {}", e);
                                 }
-
-                                // Process admin-only commands
-                                if text.starts_with("/start") {
-                                    if telegram_client.send_message(
-                                        message.chat.id,
-                                        "¡Hola! Soy tu bot de Telegram. Úsame para administrar el acceso al grupo.",
-                                    )
-                                    .await
-                                    .is_err()
-                                    {
-                                        error!(
-                                            "Failed to send start message to chat {}",
-                                            message.chat.id
-                                        );
-                                    }
-                                } else if text.starts_with("/help") {
-                                let ban_bots_directly = env::var("BAN_BOTS_DIRECTLY")
-                                    .unwrap_or_else(|_| "true".to_string())
-                                    .to_lowercase() == "true";
-                                
-                                let bot_treatment = if ban_bots_directly {
-                                    "Los bots son expulsados automáticamente"
-                                } else {
-                                    "Los bots reciben el mismo challenge que los usuarios"
-                                };
-                                
-                                let help_text = format!(
-                                    "🤖 <b>ExpulsaBot - Protección Anti-Bot</b>\n\n\
-                                    📋 <b>Comandos disponibles:</b>\n\
-                                    • /start - Iniciar el bot\n\
-                                    • /help - Ver esta ayuda\n\
-                                    • /status - Ver estado del bot\n\
-                                    • /whitelist &lt;bot_id&gt; - Permitir bot específico\n\
-                                    • /unwhitelist &lt;bot_id&gt; - Remover bot de lista blanca\n\
-                                    • /stats - Ver estadísticas del grupo\n\
-                                    • /notify &lt;on|off&gt; - Activar/desactivar notificaciones\n\n\
-                                    🔧 <b>Configuración actual:</b>\n\
-                                    {}\n\n\
-                                    ⚠️ <b>Importante:</b>\n\
-                                    Solo los administradores de Telegram pueden usar comandos del bot.\n\n\
-                                    👤 <b>Para usuarios humanos:</b>\n\
-                                    Los nuevos miembros serán desafiados para verificar que no son bots.",
-                                    bot_treatment
-                                );
-                                
-                                if telegram_client.send_message(message.chat.id, &help_text).await.is_err() {
-                                    error!("Failed to send help message to chat {}", message.chat.id);
-                                }
-                            } else if text.starts_with("/status") {
-                                let uptime = start_time.elapsed();
-                                let total_seconds = uptime.as_secs();
-                                
-                                let status_text = if total_seconds < 60 {
-                                    format!("🟢 <b>Bot Estado:</b> Activo\n⏱️ <b>Tiempo en línea:</b> {} segundos", total_seconds)
-                                } else if total_seconds < 3600 {
-                                    let minutes = total_seconds / 60;
-                                    let seconds = total_seconds % 60;
-                                    format!("🟢 <b>Bot Estado:</b> Activo\n⏱️ <b>Tiempo en línea:</b> {} minutos y {} segundos", minutes, seconds)
-                                } else if total_seconds < 86400 {
-                                    let hours = total_seconds / 3600;
-                                    let minutes = (total_seconds % 3600) / 60;
-                                    format!("🟢 <b>Bot Estado:</b> Activo\n⏱️ <b>Tiempo en línea:</b> {} horas y {} minutos", hours, minutes)
-                                } else {
-                                    let days = total_seconds / 86400;
-                                    let hours = (total_seconds % 86400) / 3600;
-                                    format!("🟢 <b>Bot Estado:</b> Activo\n⏱️ <b>Tiempo en línea:</b> {} días y {} horas", days, hours)
-                                };
-                                
-                                if telegram_client.send_message(message.chat.id, &status_text).await.is_err() {
-                                    error!("Failed to send status message to chat {}", message.chat.id);
-                                }
-                            } else if text.starts_with("/whitelist") {
-                                let parts: Vec<&str> = text.split_whitespace().collect();
-                                if parts.len() >= 2 {
-                                    if let Ok(bot_id) = parts[1].parse::<i64>() {
-                                        let mut state = bot_config_state.lock().await;
-                                        let config = state.entry(message.chat.id).or_insert_with(|| BotConfig {
-                                            whitelisted_bots: Vec::new(),
-                                            notify_on_ban: true,
-                                            banned_bots_count: 0,
-                                        });
-                                        if !config.whitelisted_bots.contains(&bot_id) {
-                                            config.whitelisted_bots.push(bot_id);
-                                            if telegram_client.send_message(message.chat.id, &format!("✅ Bot {} agregado a la lista blanca", bot_id)).await.is_err() {
-                                                error!("Failed to send whitelist confirmation");
-                                            }
-                                        } else if telegram_client.send_message(message.chat.id, &format!("⚠️ Bot {} ya está en la lista blanca", bot_id)).await.is_err() {
-                                                error!("Failed to send whitelist warning");
-                                        }
-                                    }
-                                } else if telegram_client.send_message(message.chat.id, "Uso: /whitelist <bot_id>").await.is_err() {
-                                        error!("Failed to send whitelist usage");
-                                }
-                            } else if text.starts_with("/unwhitelist") {
-                                let parts: Vec<&str> = text.split_whitespace().collect();
-                                if parts.len() >= 2 {
-                                    if let Ok(bot_id) = parts[1].parse::<i64>() {
-                                        let mut state = bot_config_state.lock().await;
-                                        if let Some(config) = state.get_mut(&message.chat.id) {
-                                            if let Some(pos) = config.whitelisted_bots.iter().position(|&x| x == bot_id) {
-                                                config.whitelisted_bots.remove(pos);
-                                                if telegram_client.send_message(message.chat.id, &format!("❌ Bot {} removido de la lista blanca", bot_id)).await.is_err() {
-                                                    error!("Failed to send unwhitelist confirmation");
-                                                }
-                                            } else if telegram_client.send_message(message.chat.id, &format!("⚠️ Bot {} no está en la lista blanca", bot_id)).await.is_err() {
-                                                    error!("Failed to send unwhitelist warning");
-                                            }
-                                        }
-                                    }
-                                } else if telegram_client.send_message(message.chat.id, "Uso: /unwhitelist <bot_id>").await.is_err() {
-                                        error!("Failed to send unwhitelist usage");
-                                }
-                            } else if text.starts_with("/stats") {
-                                let config = get_or_create_bot_config(&bot_config_state, message.chat.id).await;
-                                let stats_msg = format!(
-                                    "📊 <b>Estadísticas Anti-Bot</b>\n🤖 Bots expulsados: {}\n📝 Bots en lista blanca: {}\n🔔 Notificaciones: {}",
-                                    config.banned_bots_count,
-                                    config.whitelisted_bots.len(),
-                                    if config.notify_on_ban { "Activadas" } else { "Desactivadas" }
-                                );
-                                if telegram_client.send_message(message.chat.id, &stats_msg).await.is_err() {
-                                    error!("Failed to send stats message");
-                                }
-                            } else if text.starts_with("/notify") {
-                                let parts: Vec<&str> = text.split_whitespace().collect();
-                                if parts.len() >= 2 {
-                                    let enable = parts[1] == "on" || parts[1] == "true" || parts[1] == "1";
-                                    let mut state = bot_config_state.lock().await;
-                                    let config = state.entry(message.chat.id).or_insert_with(|| BotConfig {
-                                        whitelisted_bots: Vec::new(),
-                                        notify_on_ban: true,
-                                        banned_bots_count: 0,
-                                    });
-                                    config.notify_on_ban = enable;
-                                    let status = if enable { "activadas" } else { "desactivadas" };
-                                    if telegram_client.send_message(message.chat.id, &format!("🔔 Notificaciones {}", status)).await.is_err() {
-                                        error!("Failed to send notify confirmation");
-                                    }
-                                } else if telegram_client.send_message(message.chat.id, "Uso: /notify <on|off>").await.is_err() {
-                                        error!("Failed to send notify usage");
-                                }
-                            }
                             }
                         }
                     } else if let Some(chat_member_update) = update.chat_member {
@@ -777,9 +340,83 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                             if let Some(chat_challenges) = state_guard.get_mut(&chat_id) {
                                 if let Some(challenge) = chat_challenges.remove(&user_id) {
-                                    if selected_animal == challenge.correct_animal_name {
+                                    // Check if user responded too quickly (potential bot)
+                                    let response_time = challenge.start_time.elapsed();
+                                    let min_response_seconds = env::var("MIN_RESPONSE_SECONDS")
+                                        .unwrap_or_else(|_| "1".to_string())
+                                        .parse::<u64>()
+                                        .unwrap_or(1);
+                                    let min_response_time = Duration::from_secs(min_response_seconds);
+                                    
+                                    if response_time < min_response_time {
                                         debug!(
-                                            "User {} selected the correct animal '{}' in chat {}",
+                                            "User {} responded too quickly ({:?} < {:?}) in chat {} - treating as bot",
+                                            user_id, response_time, min_response_time, chat_id
+                                        );
+                                        
+                                        let mut messages_to_delete = vec![challenge.challenge_message_id];
+                                        
+                                        if let Ok(msg_id) = telegram_client.send_message(
+                                            chat_id,
+                                            "Respuesta demasiado rápida. Comportamiento de bot detectado.",
+                                        )
+                                        .await {
+                                            messages_to_delete.push(msg_id);
+                                        }
+
+                                        if telegram_client.ban_chat_member(chat_id, user_id)
+                                            .await
+                                            .is_err()
+                                        {
+                                            error!(
+                                                "Failed to ban user {} for quick response in chat {}",
+                                                user_id, chat_id
+                                            );
+                                        }
+
+                                        // Send event to OpenObserve
+                                        if let Some(open_observe_client) = &open_client {
+                                            let event = UserEvent {
+                                                user_id,
+                                                user_name: callback_query.from.first_name.clone(),
+                                                group_id: chat_id,
+                                                group_name: message.chat.title.as_deref().unwrap_or("Unknown Group").to_string(),
+                                                challenge_completed: false,
+                                                banned: true,
+                                            };
+                                            if let Err(e) = open_observe_client.send_user_event(&event).await {
+                                                error!("Failed to send user event to OpenObserve: {:?}", e);
+                                            }
+                                        }
+
+                                        // Send message to Matrix
+                                        if let Some(matrix_client) = &matrix_client {
+                                            let matrix_message = format!(
+                                                "el usuario {} con id {} respondió demasiado rápido ({:?}) y fue baneado del grupo {} con id {} por comportamiento de bot",
+                                                callback_query.from.first_name,
+                                                user_id,
+                                                response_time,
+                                                message.chat.title.as_deref().unwrap_or("Unknown Group"),
+                                                chat_id
+                                            );
+                                            if let Err(e) = matrix_client.send_message(&matrix_message).await {
+                                                error!("Failed to send message to Matrix: {:?}", e);
+                                            }
+                                        }
+                                        
+                                        // Schedule message deletion
+                                        delete_messages_after_delay(
+                                            telegram_client.clone(),
+                                            chat_id,
+                                            messages_to_delete,
+                                            30,
+                                        ).await;
+
+                                        challenge_removed = true;
+                                        let _ = challenge.tx.send(());
+                                    } else if selected_animal == challenge.correct_answer {
+                                        debug!(
+                                            "User {} selected the correct answer '{}' in chat {}",
                                             user_id, selected_animal, chat_id
                                         );
 
@@ -841,7 +478,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         let _ = challenge.tx.send(());
                                     } else {
                                         debug!(
-                                            "User {} selected the wrong animal '{}' in chat {}",
+                                            "User {} selected the wrong answer '{}' in chat {}",
                                             user_id, selected_animal, chat_id
                                         );
                                         
@@ -849,7 +486,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         
                                         if let Ok(msg_id) = telegram_client.send_message(
                                             chat_id,
-                                            "Ese no es el animal correcto. Has fallado el desafío.",
+                                            "Esa no es la respuesta correcta. Has fallado el desafío matemático.",
                                         )
                                         .await {
                                             messages_to_delete.push(msg_id);
