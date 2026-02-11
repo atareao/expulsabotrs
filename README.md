@@ -8,13 +8,13 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)](https://github.com/atareao/expulsabot)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue?style=flat-square)](https://github.com/atareao/expulsabot)
+[![Version](https://img.shields.io/badge/version-0.3.3-blue?style=flat-square)](https://github.com/atareao/expulsabot)
 [![Rust Version](https://img.shields.io/badge/rust-1.70+-orange?style=flat-square)](https://www.rust-lang.org/)
 [![Docker Image](https://img.shields.io/badge/docker-atareao/expulsabot-blue?style=flat-square)](https://hub.docker.com/r/atareao/expulsabot)
 
-> 🛡️ **Bot de Telegram avanzado para protección anti-bot, verificación de usuarios y monitoreo integral**
+> 🛡️ **Bot de Telegram avanzado para protección anti-bot con desafíos matemáticos y monitoreo integral**
 
-ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protección automática contra bots maliciosos, sistema de verificación inteligente para nuevos miembros de grupos, y registro completo de eventos en OpenObserve y Matrix.
+ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protección automática contra bots maliciosos mediante desafíos matemáticos inteligentes, sistema de verificación avanzado para nuevos miembros de grupos, y registro completo de eventos en OpenObserve y Matrix.
 
 ---
 
@@ -27,9 +27,13 @@ ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protecció
 - ✅ **Detección múltiple** (new_chat_members, new_chat_member, new_chat_participant)
 - ✅ **Estadísticas detalladas** de bots expulsados
 
-### 🎯 **Sistema de Desafíos**
+### 🎯 **Sistema de Desafíos Matemáticos**
 
-- 🐧 **Desafíos con emojis de animales** (pingüino, ballena, cangrejo, zorro, foca, serpiente)
+- 🧮 **Desafíos con problemas matemáticos** (resta de números del 0-9 con emojis)
+- 🔢 **Respuestas únicas** (5 opciones siempre diferentes)
+- 🚫 **Primer botón siempre incorrecto** (previene bots que eligen primera opción)
+- ⚡ **Detección de bots por velocidad** (respuesta en menos de 1 segundo configurable)
+- 🎲 **UUIDs únicos** para cada botón de respuesta
 - ⏱️ **Timer configurable** (por defecto 2 minutos)
 - 🔄 **Restricción temporal** durante el desafío
 - 🧹 **Limpieza automática** de mensajes después de 30 segundos
@@ -38,8 +42,10 @@ ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protecció
 
 - 🌍 **Variable de entorno** para tratamiento de bots (`BAN_BOTS_DIRECTLY`)
 - 🔔 **Notificaciones configurables** de expulsión
+- ⚡ **Detección de velocidad de respuesta** (`MIN_RESPONSE_SECONDS`)
 - 📊 **Comandos administrativos** completos
 - 🕐 **Zona horaria Europe/Madrid**
+- 🎛️ **Arquitectura modular** (main.rs, bot.rs, commands.rs)
 
 ### 📊 **Monitoreo y Analytics**
 
@@ -67,6 +73,7 @@ TOKEN=tu_bot_token_aquí
 CHALLENGE_DURATION_MINUTES=2
 BAN_BOTS_DIRECTLY=true
 MESSAGE_CLEANUP_DELAY_SECONDS=30
+MIN_RESPONSE_SECONDS=1
 
 # OpenObserve Integration (Opcional)
 OPEN_OBSERVE_URL=tu_openobserve_url
@@ -103,14 +110,15 @@ cargo build --release
 
 ## 📋 **Comandos Disponibles**
 
-| Comando                 | Descripción                          | Ejemplo                  |
-| ----------------------- | ------------------------------------ | ------------------------ |
-| `/start`                | Iniciar el bot                       | `/start`                 |
-| `/help`                 | Mostrar ayuda y configuración actual | `/help`                  |
-| `/whitelist <bot_id>`   | Agregar bot a lista blanca           | `/whitelist 123456789`   |
-| `/unwhitelist <bot_id>` | Remover bot de lista blanca          | `/unwhitelist 123456789` |
-| `/stats`                | Ver estadísticas del grupo           | `/stats`                 |
-| `/notify <on\|off>`     | Activar/desactivar notificaciones    | `/notify on`             |
+| Comando                 | Descripción                           | Ejemplo                  |
+| ----------------------- | ------------------------------------- | ------------------------ |
+| `/start`                | Iniciar el bot                        | `/start`                 |
+| `/help`                 | Mostrar ayuda y configuración actual  | `/help`                  |
+| `/status`               | Ver estado y tiempo de funcionamiento | `/status`                |
+| `/whitelist <bot_id>`   | Agregar bot a lista blanca            | `/whitelist 123456789`   |
+| `/unwhitelist <bot_id>` | Remover bot de lista blanca           | `/unwhitelist 123456789` |
+| `/stats`                | Ver estadísticas del grupo            | `/stats`                 |
+| `/notify <on\|off>`     | Activar/desactivar notificaciones     | `/notify on`             |
 
 ---
 
@@ -120,6 +128,7 @@ cargo build --release
 | ------------------------------- | ------------------------------- | --------------- | --------- |
 | `TOKEN`                         | Token del bot de Telegram       | -               | ✅        |
 | `CHALLENGE_DURATION_MINUTES`    | Duración del desafío en minutos | `2`             | ❌        |
+| `MIN_RESPONSE_SECONDS`          | Tiempo mínimo para respuesta    | `1`             | ❌        |
 | `BAN_BOTS_DIRECTLY`             | Expulsar bots automáticamente   | `true`          | ❌        |
 | `MESSAGE_CLEANUP_DELAY_SECONDS` | Tiempo para eliminar mensajes   | `30`            | ❌        |
 | `TZ`                            | Zona horaria                    | `Europe/Madrid` | ❌        |
@@ -173,13 +182,14 @@ docker pull atareao/expulsabot:latest
 #### `BAN_BOTS_DIRECTLY=false` (Modo Challenge)
 
 ```
-🤖 Bot detectado → 🎯 Aplicar desafío → ❌ Expulsar si falla
+🤖 Bot detectado → 🧮 Aplicar desafío matemático → ❌ Expulsar si falla
 ```
 
 ### **Sistema de Limpieza Automática**
 
 - **Éxito**: `"Juan ha pasado la verificación. ¡Bienvenido!"` → 🗑️ 30s
-- **Fallo**: `"Ese no es el animal correcto."` → 🗑️ 30s
+- **Fallo**: `"Esa no es la respuesta correcta."` → 🗑️ 30s
+- **Bot detectado**: `"Respuesta demasiado rápida. Comportamiento de bot detectado."` → 🗑️ 30s
 - **Timeout**: `"El usuario Juan fue expulsado..."` → 🗑️ 30s
 
 ### **Sistema de Monitoreo Integral**
@@ -205,6 +215,7 @@ Mensajes en tiempo real enviados a Matrix:
 
 - ✅ **Challenge exitoso**: `"el usuario Juan Pérez con id 123456789 si superó el challenge y no fue baneado del grupo Mi Grupo con id -987654321"`
 - ❌ **Challenge fallido**: `"el usuario Juan Pérez con id 123456789 no superó el challenge y fue baneado del grupo Mi Grupo con id -987654321"`
+- ⚡ **Bot detectado**: `"el usuario Juan Pérez con id 123456789 respondió demasiado rápido (500ms) y fue baneado del grupo Mi Grupo con id -987654321 por comportamiento de bot"`
 - ⏰ **Timeout**: `"el usuario Juan Pérez con id 123456789 no superó el challenge y fue baneado del grupo Mi Grupo con id -987654321"`
 
 ---
@@ -218,7 +229,8 @@ Mensajes en tiempo real enviados a Matrix:
 - **🌐 Reqwest** - Cliente HTTP para APIs (Telegram, OpenObserve, Matrix)
 - **📝 Serde** - Serialización JSON
 - **🔍 Tracing** - Sistema de logging
-- **🎲 Rand** - Generación aleatoria para desafíos
+- **🎲 Rand** - Generación aleatoria para desafíos matemáticos
+- **🆔 UUID** - Generación de identificadores únicos para botones
 - **📊 OpenObserve** - Analytics y monitoreo de eventos
 - **💬 Matrix** - Notificaciones en tiempo real
 
@@ -227,15 +239,18 @@ Mensajes en tiempo real enviados a Matrix:
 ```
 expulsabot/
 ├── src/
-│   ├── main.rs           # Lógica principal del bot
-│   ├── telegram.rs       # Estructuras y API de Telegram
-│   ├── openobserve.rs    # Integración con OpenObserve
-│   └── matrix.rs         # Integración con Matrix
-├── Cargo.toml           # Dependencias de Rust
-├── Dockerfile           # Imagen Docker multi-etapa
-├── compose.yml          # Configuración Docker Compose
-├── .env.example         # Variables de entorno de ejemplo
-└── README.md           # Este archivo
+│   ├── main.rs              # Loop principal y manejo de eventos
+│   ├── bot.rs               # Lógica de desafíos y gestión de bots
+│   ├── commands.rs          # Manejo de comandos del bot
+│   ├── telegram.rs          # Estructuras y API de Telegram
+│   ├── openobserve.rs       # Integración con OpenObserve
+│   ├── matrix.rs            # Integración con Matrix
+│   └── challenge_tests.rs   # Tests unitarios completos
+├── Cargo.toml              # Dependencias de Rust
+├── Dockerfile              # Imagen Docker multi-etapa
+├── compose.yml             # Configuración Docker Compose
+├── .env.example            # Variables de entorno de ejemplo
+└── README.md              # Este archivo
 ```
 
 ### **Compilar para Desarrollo**
