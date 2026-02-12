@@ -95,13 +95,6 @@ const CATEGORIES: &[Category] = &[
         ],
     },
     Category {
-        name: "muebles y decoración",
-        singular_form: "un mueble o decoración",
-        emojis: &[
-            "🪑", "🛏️", "🛋️", "🪞", "🕯️", "🏺", "🖼️", "🕰️", "💡", "🪟", "🧸", "🎁", "🏮", "🪔",
-        ],
-    },
-    Category {
         name: "deportes",
         singular_form: "un deporte",
         emojis: &[
