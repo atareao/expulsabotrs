@@ -70,90 +70,136 @@ pub struct BotConfig {
 
 pub type BotConfigState = Arc<Mutex<HashMap<i64, BotConfig>>>; // Por chat
 
-// Define number emojis for math challenge
-const NUMBER_EMOJIS: &[&str] = &["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"];
+// Define categories and their emojis
+pub struct Category {
+    pub name: &'static str,
+    pub singular_form: &'static str,
+    pub emojis: &'static [&'static str],
+}
 
-// Function to generate a math problem
-pub fn generate_math_problem() -> (String, String, Vec<(String, String)>) {
+const CATEGORIES: &[Category] = &[
+    Category {
+        name: "animales",
+        singular_form: "un animal",
+        emojis: &[
+            "🐕", "🐱", "🐰", "🐸", "🦊", "🐼", "🐨", "🦁", "🐵", "🐮", "🐷", "🐯", "🦒", "🐘",
+            "🦓",
+        ],
+    },
+    Category {
+        name: "comida",
+        singular_form: "comida",
+        emojis: &[
+            "🍕", "🍔", "🍎", "🍌", "🍇", "🥕", "🍅", "🥐", "🧀", "🥓", "🍗", "🍰", "🍪", "🍫",
+            "🥗",
+        ],
+    },
+    Category {
+        name: "muebles y decoración",
+        singular_form: "un mueble o decoración",
+        emojis: &[
+            "🪑", "🛏️", "🛋️", "🪞", "🕯️", "🏺", "🖼️", "🕰️", "💡", "🪟", "🧸", "🎁", "🏮", "🪔",
+        ],
+    },
+    Category {
+        name: "deportes",
+        singular_form: "un deporte",
+        emojis: &[
+            "⚽", "🏀", "🎾", "🏈", "⚾", "🏐", "🏓", "🏸", "🥊", "🎱", "🎯", "🏹", "⛳", "🥅",
+            "🏆",
+        ],
+    },
+    Category {
+        name: "vehículos",
+        singular_form: "un vehículo",
+        emojis: &[
+            "🚗", "🚕", "🚙", "🚐", "🚛", "🚌", "🚎", "🏎️", "🚓", "🚑", "🚒", "🚚", "🛻", "🏍️",
+            "🚲",
+        ],
+    },
+    Category {
+        name: "fenómenos climáticos",
+        singular_form: "un fenómeno climático",
+        emojis: &[
+            "☀️", "🌙", "⭐", "☁️", "⛅", "🌧️", "⛈️", "🌩️", "❄️", "🌨️", "🌪️", "🌈", "⚡", "🔥",
+            "💧",
+        ],
+    },
+    Category {
+        name: "herramientas",
+        singular_form: "una herramienta",
+        emojis: &[
+            "🔨", "🔧", "🪚", "⚒️", "🛠️", "⛏️", "🪓", "🔩", "⚙️", "🪛", "📏", "📐", "✂️", "🔪",
+            "✏️",
+        ],
+    },
+    Category {
+        name: "plantas",
+        singular_form: "una planta",
+        emojis: &[
+            "🌳", "🌲", "🌴", "🌵", "🌿", "🍀", "🌺", "🌸", "🌼", "🌻", "🌷", "🥀", "💐", "🌱",
+            "🌾",
+        ],
+    },
+    Category {
+        name: "edificios",
+        singular_form: "un edificio",
+        emojis: &[
+            "🏠", "🏡", "🏢", "🏣", "🏤", "🏥", "🏦", "🏨", "🏩", "🏪", "🏫", "🏬", "🏭", "🏯",
+            "🏰",
+        ],
+    },
+];
+
+pub fn generate_category_challenge() -> (String, String, Vec<(String, String)>) {
     let mut rng = rand::rng();
-    let a = rng.random_range(0..=9);
-    let b = rng.random_range(0..=a);
-    let correct_answer = a - b;
 
-    // Create problem text with emojis
-    let problem = format!("{} ➖ {} = ❓", NUMBER_EMOJIS[a], NUMBER_EMOJIS[b]);
-
-    // Generate 5 unique numbers: 1 correct + 4 incorrect
-    let mut all_numbers = std::collections::HashSet::new();
-    all_numbers.insert(correct_answer); // Start with correct answer
-
-    // Generate 4 different wrong answers
-    while all_numbers.len() < 5 {
-        let wrong = rng.random_range(0..=9);
-        all_numbers.insert(wrong);
+    // Select two different categories
+    let main_category_idx = rng.random_range(0..CATEGORIES.len());
+    let mut different_category_idx = rng.random_range(0..CATEGORIES.len());
+    while different_category_idx == main_category_idx {
+        different_category_idx = rng.random_range(0..CATEGORIES.len());
     }
 
-    // Convert to vector and separate correct from incorrect
-    let mut unique_numbers: Vec<usize> = all_numbers.into_iter().collect();
+    let main_category = &CATEGORIES[main_category_idx];
+    let different_category = &CATEGORIES[different_category_idx];
 
-    // If somehow we don't have 5 unique numbers (shouldn't happen with 10 possible numbers)
-    // but let's be safe and fill with remaining numbers
-    while unique_numbers.len() < 5 {
-        for num in 0..=9 {
-            if !unique_numbers.contains(&num) {
-                unique_numbers.push(num);
-                if unique_numbers.len() >= 5 {
-                    break;
-                }
-            }
+    // Select 4 emojis from main category
+    let mut main_emojis = Vec::new();
+    let mut used_indices = std::collections::HashSet::new();
+    while main_emojis.len() < 4 {
+        let idx = rng.random_range(0..main_category.emojis.len());
+        if !used_indices.contains(&idx) {
+            used_indices.insert(idx);
+            main_emojis.push(main_category.emojis[idx]);
         }
     }
 
-    // Take only the first 5 numbers
-    unique_numbers.truncate(5);
+    // Select 1 emoji from different category
+    let different_emoji =
+        different_category.emojis[rng.random_range(0..different_category.emojis.len())];
 
-    // Separate correct answer from incorrect ones
-    let correct_index = unique_numbers
-        .iter()
-        .position(|&x| x == correct_answer)
-        .unwrap();
-    unique_numbers.remove(correct_index);
-    let incorrect_numbers = unique_numbers; // Now we have 4 incorrect numbers
+    // Create all 5 emojis and shuffle them
+    let mut all_emojis = main_emojis.clone();
+    all_emojis.push(different_emoji);
+    all_emojis.shuffle(&mut rng);
 
-    // Select first button (always incorrect)
-    let first_wrong_index = rng.random_range(0..incorrect_numbers.len());
-    let first_wrong = incorrect_numbers[first_wrong_index];
+    // Create the question
+    let question = format!("¿Cuál de estos NO es {}?", main_category.singular_form);
 
-    // Prepare remaining numbers for positions 2-5 (3 incorrect + 1 correct)
-    let mut remaining_numbers = Vec::new();
-    for (i, &number) in incorrect_numbers.iter().enumerate() {
-        if i != first_wrong_index {
-            remaining_numbers.push(number);
-        }
-    }
-    remaining_numbers.push(correct_answer); // Add correct answer
-
-    // Shuffle positions 2-5
-    remaining_numbers.shuffle(&mut rng);
-
-    // Create buttons
+    // Create buttons with UUIDs
     let mut answers = Vec::new();
     let mut correct_uuid = String::new();
 
-    // First button (always wrong)
-    let first_uuid = Uuid::new_v4().to_string();
-    answers.push((NUMBER_EMOJIS[first_wrong].to_string(), first_uuid));
-
-    // Remaining buttons (3 wrong + 1 correct, shuffled)
-    for &number in &remaining_numbers {
+    for emoji in &all_emojis {
         let uuid = Uuid::new_v4().to_string();
-        if number == correct_answer {
+        if *emoji == different_emoji {
             correct_uuid = uuid.clone();
         }
-        answers.push((NUMBER_EMOJIS[number].to_string(), uuid));
+        answers.push((emoji.to_string(), uuid));
     }
 
-    (problem, correct_uuid, answers)
+    (question, correct_uuid, answers)
 }
 
 // --- Timer Task ---
@@ -288,9 +334,9 @@ pub async fn process_new_member(
     }
     debug!("Permissions restricted for user {}", user_id);
 
-    let (problem_text, correct_uuid, answer_options) = generate_math_problem();
+    let (problem_text, correct_uuid, answer_options) = generate_category_challenge();
 
-    let mut keyboard_buttons = Vec::new();
+    let mut keyboard_buttons: Vec<InlineKeyboardButton> = Vec::new();
     for (emoji_text, uuid) in &answer_options {
         keyboard_buttons.push(InlineKeyboardButton {
             text: emoji_text.clone(),
@@ -387,6 +433,48 @@ pub async fn process_new_member(
                 );
             }
             Err(e)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_category_challenge() {
+        println!("🧪 Probando el sistema de categorización...\n");
+
+        for i in 1..=5 {
+            let (question, correct_uuid, options) = generate_category_challenge();
+
+            println!("--- Desafío {} ---", i);
+            println!("❓ {}", question);
+            println!("🔗 UUID correcto: {}", correct_uuid);
+            println!("📋 Opciones:");
+
+            // Verify that we have 5 options
+            assert_eq!(options.len(), 5);
+
+            // Verify that one of the options has the correct UUID
+            let has_correct_uuid = options.iter().any(|(_, uuid)| *uuid == correct_uuid);
+            assert!(
+                has_correct_uuid,
+                "None of the options matches the correct UUID"
+            );
+
+            // Verify question format
+            assert!(
+                question.contains("¿Cuál de estos NO es "),
+                "Question doesn't have expected format"
+            );
+
+            for (j, (emoji, uuid)) in options.iter().enumerate() {
+                let marker = if *uuid == correct_uuid { "✅" } else { "❌" };
+                println!("   {}. {} {} ({})", j + 1, emoji, marker, uuid);
+            }
+
+            println!();
         }
     }
 }

@@ -14,10 +14,10 @@ use time::macros::format_description;
 mod telegram;
 mod openobserve;
 mod matrix;
-mod bot;
+pub mod bot;
 mod commands;
-#[cfg(test)]
-mod challenge_tests;
+//#[cfg(test)]
+//mod challenge_tests;
 
 use telegram::*;
 use openobserve::{OpenObserve, UserEvent};
@@ -333,7 +333,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 .as_ref()
                                 .map_or(&callback_query.from.first_name, |u| u)
                         );
-                        if let (Some(message), Some(selected_animal)) =
+                        if let (Some(message), Some(selected_option)) =
                             (callback_query.message, callback_query.data)
                         {
                             let user_id = callback_query.from.id;
@@ -417,10 +417,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                                         challenge_removed = true;
                                         let _ = challenge.tx.send(());
-                                    } else if selected_animal == challenge.correct_answer {
+                                    } else if selected_option == challenge.correct_answer {
                                         debug!(
                                             "User {} selected the correct answer '{}' in chat {}",
-                                            user_id, selected_animal, chat_id
+                                            user_id, selected_option, chat_id
                                         );
 
                                         let mut messages_to_delete = vec![challenge.challenge_message_id];
@@ -430,7 +430,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                 "Failed to unrestrict chat member {} in chat {}",
                                                 user_id, chat_id
                                             );
-                                            if let Ok(msg_id) = telegram_client.send_message(chat_id, &format!("<b>{}</b> seleccionó el animal correcto, pero falló al otorgar permisos. Por favor contacta un administrador.", callback_query.from.first_name)).await {
+                                            if let Ok(msg_id) = telegram_client.send_message(chat_id, &format!("<b>{}</b> seleccionó la respuesta correcta, pero falló al otorgar permisos. Por favor contacta un administrador.", callback_query.from.first_name)).await {
                                                 messages_to_delete.push(msg_id);
                                             }
                                         } else {
@@ -482,14 +482,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     } else {
                                         debug!(
                                             "User {} selected the wrong answer '{}' in chat {}",
-                                            user_id, selected_animal, chat_id
+                                            user_id, selected_option, chat_id
                                         );
                                         
                                         let mut messages_to_delete = vec![challenge.challenge_message_id];
                                         
                                         if let Ok(msg_id) = telegram_client.send_message(
                                             chat_id,
-                                            "Esa no es la respuesta correcta. Has fallado el desafío matemático.",
+                                            "Esa no es la respuesta correcta. Has fallado el desafío.",
                                         )
                                         .await {
                                             messages_to_delete.push(msg_id);

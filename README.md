@@ -12,9 +12,9 @@
 [![Rust Version](https://img.shields.io/badge/rust-1.70+-orange?style=flat-square)](https://www.rust-lang.org/)
 [![Docker Image](https://img.shields.io/badge/docker-atareao/expulsabot-blue?style=flat-square)](https://hub.docker.com/r/atareao/expulsabot)
 
-> 🛡️ **Bot de Telegram avanzado para protección anti-bot con desafíos matemáticos y monitoreo integral**
+> 🛡️ **Bot de Telegram avanzado para protección anti-bot con desafíos de categorización inteligentes y monitoreo integral**
 
-ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protección automática contra bots maliciosos mediante desafíos matemáticos inteligentes, sistema de verificación avanzado para nuevos miembros de grupos, y registro completo de eventos en OpenObserve y Matrix.
+ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protección automática contra bots maliciosos mediante desafíos de categorización de emojis, sistema de verificación avanzado para nuevos miembros de grupos, y registro completo de eventos en OpenObserve y Matrix.
 
 ---
 
@@ -27,13 +27,14 @@ ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protecció
 - ✅ **Detección múltiple** (new_chat_members, new_chat_member, new_chat_participant)
 - ✅ **Estadísticas detalladas** de bots expulsados
 
-### 🎯 **Sistema de Desafíos Matemáticos**
+### 🎯 **Sistema de Desafíos de Categorización**
 
-- 🧮 **Desafíos con problemas matemáticos** (resta de números del 0-9 con emojis)
-- 🔢 **Respuestas únicas** (5 opciones siempre diferentes)
-- 🚫 **Primer botón siempre incorrecto** (previene bots que eligen primera opción)
+- 🎨 **Desafíos con categorización de emojis** (9 categorías: animales, comida, muebles, deportes, etc.)
+- 🧩 **Formato intuitivo** (4 emojis de una categoría + 1 de otra diferente)
+- 📝 **Preguntas gramaticalmente correctas** ("¿Cuál de estos NO es un animal?")
+- 🎲 **177+ millones de combinaciones únicas** posibles
 - ⚡ **Detección de bots por velocidad** (respuesta en menos de 1 segundo configurable)
-- 🎲 **UUIDs únicos** para cada botón de respuesta
+- 🎯 **UUIDs únicos** para cada botón de respuesta
 - ⏱️ **Timer configurable** (por defecto 2 minutos)
 - 🔄 **Restricción temporal** durante el desafío
 - 🧹 **Limpieza automática** de mensajes después de 30 segundos
@@ -53,6 +54,30 @@ ExpulsaBot es un bot de Telegram desarrollado en Rust que proporciona protecció
 - 💬 **Matrix Integration** - Notificaciones en tiempo real
 - 📋 **Event Logging** - Registro completo de actividades de usuarios
 - 🔍 **Estadísticas detalladas** de comportamiento de grupo
+
+---
+
+## 🎨 **Categorías de Desafíos**
+
+El sistema incluye **9 categorías** perfectamente diferenciadas:
+
+| Categoría                | Ejemplos de Emojis            | Pregunta                                       |
+| ------------------------ | ----------------------------- | ---------------------------------------------- |
+| 🐕 **Animales**          | 🐕 🐱 🐰 🐸 🦊 🐼 🐨 🦁 🐵 🐮 | "¿Cuál de estos NO es un animal?"              |
+| 🍕 **Comida**            | 🍕 🍔 🍎 🍌 🍇 🥕 🍅 🥐 🧀 🥓 | "¿Cuál de estos NO es comida?"                 |
+| 🪑 **Muebles y Decor.**  | 🪑 🛏️ 🛋️ 🪞 🕯️ 🏺 🖼️ 🕰️ 💡 🪟 | "¿Cuál de estos NO es un mueble o decoración?" |
+| ⚽ **Deportes**          | ⚽ 🏀 🎾 🏈 ⚾ 🏐 🏓 🏸 🥊 🎱 | "¿Cuál de estos NO es un deporte?"             |
+| 🚗 **Vehículos**         | 🚗 🚕 🚙 🚐 🚛 🚌 🚎 🏎️ 🚓 🚑 | "¿Cuál de estos NO es un vehículo?"            |
+| ☀️ **Fenómenos Climát.** | ☀️ 🌙 ⭐ ☁️ ⛅ 🌧️ ⛈️ 🌩️ ❄️ 🌨️ | "¿Cuál de estos NO es un fenómeno climático?"  |
+| 🔨 **Herramientas**      | 🔨 🔧 🪚 ⚒️ 🛠️ ⛏️ 🪓 🔩 ⚙️ 🪛 | "¿Cuál de estos NO es una herramienta?"        |
+| 🌳 **Plantas**           | 🌳 🌲 🌴 🌵 🌿 🍀 🌺 🌸 🌼 🌻 | "¿Cuál de estos NO es una planta?"             |
+| 🏠 **Edificios**         | 🏠 🏡 🏢 🏣 🏤 🏥 🏦 🏨 🏩 🏪 | "¿Cuál de estos NO es un edificio?"            |
+
+**Ejemplos de desafíos generados:**
+
+- **"¿Cuál de estos NO es comida?"** → 🍕 🍔 🥐 🧀 + 🚗 (vehículo)
+- **"¿Cuál de estos NO es un animal?"** → 🐕 🐱 🦊 🐼 + 🌺 (planta)
+- **"¿Cuál de estos NO es un vehículo?"** → 🚗 🚛 🚌 🏎️ + 🔨 (herramienta)
 
 ---
 
@@ -182,7 +207,7 @@ docker pull atareao/expulsabot:latest
 #### `BAN_BOTS_DIRECTLY=false` (Modo Challenge)
 
 ```
-🤖 Bot detectado → 🧮 Aplicar desafío matemático → ❌ Expulsar si falla
+🤖 Bot detectado → 🎨 Aplicar desafío de categorización → ❌ Expulsar si falla
 ```
 
 ### **Sistema de Limpieza Automática**
@@ -229,7 +254,7 @@ Mensajes en tiempo real enviados a Matrix:
 - **🌐 Reqwest** - Cliente HTTP para APIs (Telegram, OpenObserve, Matrix)
 - **📝 Serde** - Serialización JSON
 - **🔍 Tracing** - Sistema de logging
-- **🎲 Rand** - Generación aleatoria para desafíos matemáticos
+- **🎲 Rand** - Generación aleatoria para desafíos de categorización
 - **🆔 UUID** - Generación de identificadores únicos para botones
 - **📊 OpenObserve** - Analytics y monitoreo de eventos
 - **💬 Matrix** - Notificaciones en tiempo real
@@ -240,7 +265,7 @@ Mensajes en tiempo real enviados a Matrix:
 expulsabot/
 ├── src/
 │   ├── main.rs              # Loop principal y manejo de eventos
-│   ├── bot.rs               # Lógica de desafíos y gestión de bots
+│   ├── bot.rs               # Lógica de desafíos de categorización y gestión de bots
 │   ├── commands.rs          # Manejo de comandos del bot
 │   ├── telegram.rs          # Estructuras y API de Telegram
 │   ├── openobserve.rs       # Integración con OpenObserve
